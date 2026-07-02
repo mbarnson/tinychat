@@ -134,32 +134,25 @@ So iOS simulator UI tests remain useful for deterministic/no-CoreAI builds, but 
 
 ## Real macOS model smoke status
 
-Partially unblocked by Xcode 27 beta.
+Complete for macOS local inference after booting the workstation onto macOS 27.
 
-The Qwen3 0.6B artifact export and App Support seed succeeded, and the app target now links Apple's `CoreAILM` package product under Xcode 27 beta. Build-only verification passes for macOS and generic iOS device using `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`.
+The Qwen3 0.6B artifact export and App Support seed succeeded, and the app target links Apple's `CoreAILM` package product under Xcode 27 beta. Full linked macOS verification now passes using `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`.
 
-The real macOS seeded-model smoke test still cannot run on this workstation because the host OS is macOS 26.6 while the app/test deployment target is macOS 27.0. `xcodebuild test -destination 'platform=macOS'` fails before launch with:
+The real macOS seeded-model UI smoke now exercises the app end to end: the UI test seeds the exported Qwen3 0.6B artifact into the sandbox App Support cache, launches the app, auto-sends a prompt with thinking disabled, waits for the persisted assistant message, and fails if the model status, chat-level error, or assistant-message error appears. The app streams real CoreAI/FoundationModels output and persists the assistant message.
 
-```text
-Cannot test target “tinychatTests” on “My Mac”: My Mac’s macOS 26.6 doesn’t match tinychatTests’s macOS 27.0 deployment target.
-```
+Observed correction during verification:
 
-Update after Xcode 27 Beta 2 install:
-
-- `scripts/set-coreailm-link.py enable` successfully links the app target's `CoreAILM` product dependency and Frameworks phase.
-- `testRealModelSmokeWhenEnabled`, gated by `TINYCHAT_RUN_REAL_MODEL_UI_TEST=1`, is ready but still host-runtime blocked for macOS until a macOS 27 runtime host is available.
+- The app must pass a plain prompt string to `LanguageModelSession.streamResponse(to:options:)`; prior transcript-shaped prompt text caused the real model path to stall in UI smoke.
+- `ChatEngine.responseEvents(for:)` is `nonisolated` so test and generation tasks can call it without main-actor isolation.
+- SwiftUI `Text` with `.textSelection(.enabled)` should not be given an explicit `.accessibilityLabel(message.text)`/`.accessibilityLabel(text)` that mirrors its own content. On macOS 27 this triggered recursive SwiftUI accessibility label resolution and crashed under XCUI automation; the text already exposes its content.
 
 ## Deviations from plan
 
-- The macOS real-model smoke test did not run because this machine is still booted on macOS 26.6; Xcode 27 beta provides SDK 27 but cannot run a macOS 27 deployment-target test bundle on a macOS 26.6 host.
-- Linked macOS and generic iOS device builds now pass under Xcode 27 beta with no deployment-target overrides.
-- Linked iOS simulator tests/builds fail in Apple's `coreai-models` package because the simulator SDK cannot resolve module `CoreAI`.
-- Title generation is prompt-only fallback from the first user message. No auxiliary model title prompt is run yet, avoiding cache/session complexity before real CoreAI inference is verified.
+- Linked iOS simulator tests/builds still fail in Apple's `coreai-models` package because the simulator SDK cannot resolve module `CoreAI`.
+- Title generation remains prompt-only fallback from the first user message. No auxiliary model title prompt is run yet, avoiding cache/session complexity before real CoreAI inference is verified on iOS.
 
 ## Remaining work for Phase 02 / next checkpoint
 
-- To run the real macOS seeded-model smoke, boot a macOS 27 host/runtime, then run:
-  - `TINYCHAT_RUN_REAL_MODEL_UI_TEST=1 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -project tinychat.xcodeproj -scheme tinychat -destination 'platform=macOS' -derivedDataPath .build/DerivedDataBeta test`
 - For linked iOS runtime verification, use a physical iOS 27 device unless/until `CoreAI` becomes available to the iOS Simulator SDK.
 - Build the manifest/ZIP download/cache lifecycle against fixture assets first.
 - Replace local App Support seeding with the production first-run download flow.

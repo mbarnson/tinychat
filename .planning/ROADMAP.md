@@ -8,11 +8,11 @@ Build the Simple, Lovable, Complete tinychat app: local CoreAI chat on macOS/iOS
 
 ## Phase 01 — Foundation and macOS local inference
 
-Status: partially unblocked by Xcode 27 beta; build-only CoreAILM link passes, runtime smoke still host/device blocked
+Status: complete for macOS local inference; linked iOS simulator remains blocked by Apple's CoreAI package/SDK availability
 
 Purpose: replace the stock template, establish CoreAI dependency/platform baseline, seed a macOS App Support model cache, and prove real Qwen3 0.6B streaming inference in the beginning of the final chat UI.
 
-Checkpoint 2026-07-02: schema/UI/cache/test infrastructure is implemented; Qwen3 0.6B macOS export and App Support seeding succeeded; `CoreAILM` is now linked into the app target; linked macOS and generic iOS device builds pass under `/Applications/Xcode-beta.app` / SDK 27 with no deployment-target overrides. Real macOS app inference smoke is still blocked because the host is macOS 26.6 and cannot run macOS 27 deployment-target test bundles. Linked iOS simulator builds fail inside Apple's `coreai-models` package because the iOS Simulator SDK cannot resolve module `CoreAI`; use physical iOS 27 hardware for linked iOS runtime verification.
+Checkpoint 2026-07-02: schema/UI/cache/test infrastructure is implemented; Qwen3 0.6B macOS export and App Support seeding succeeded; `CoreAILM` is linked into the app target; full linked macOS tests pass on a macOS 27 host under `/Applications/Xcode-beta.app` / SDK 27, including a real Qwen3 0.6B CoreAI UI smoke through the app. Linked iOS simulator builds still fail inside Apple's `coreai-models` package because the iOS Simulator SDK cannot resolve module `CoreAI`; use physical iOS 27 hardware for linked iOS runtime verification.
 
 Plans:
 

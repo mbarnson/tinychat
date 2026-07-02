@@ -226,6 +226,7 @@ struct ContentView: View {
 
         isInstallingModel = true
         modelInstallError = nil
+        defer { isInstallingModel = false }
 
         do {
             let cache = ModelCache()
@@ -236,18 +237,21 @@ struct ContentView: View {
             if !FileManager.default.fileExists(atPath: marker.path(percentEncoded: false)) {
                 try Data("fixture".utf8).write(to: marker)
             }
-            let manifest = ModelArtifactManifest(
-                version: "fixture",
-                sourceURL: source,
-                expectedFiles: ["model.mil"]
-            )
-            try cache.installBaseModel(from: manifest)
-            modelStatus = cache.baseModelStatus()
+            try installModelFixture(source: source, version: "fixture", expectedFiles: ["model.mil"])
         } catch {
             modelInstallError = error.localizedDescription
         }
+    }
 
-        isInstallingModel = false
+    private func installModelFixture(source: URL, version: String, expectedFiles: [String]) throws {
+        let cache = ModelCache()
+        let manifest = ModelArtifactManifest(
+            version: version,
+            sourceURL: source,
+            expectedFiles: expectedFiles
+        )
+        try cache.installBaseModel(from: manifest)
+        modelStatus = cache.baseModelStatus()
     }
 
     private func deleteInstalledModel() {
@@ -362,7 +366,58 @@ struct ContentView: View {
         modelContext.insert(chat)
         selectedChatID = chat.id
         try? modelContext.save()
+
+        if arguments.contains("--disable-thinking") {
+            chat.thinkingEnabled = false
+            try? modelContext.save()
+        }
+
+        if arguments.contains("--install-fixture-model"),
+           let fixturePath = argumentValue(after: "--fixture-model-path", in: arguments) {
+            do {
+                let source = URL(fileURLWithPath: fixturePath, isDirectory: true)
+                try installModelFixture(
+                    source: source,
+                    version: "ui-test",
+                    expectedFiles: try modelArtifactFiles(in: source)
+                )
+                modelInstallError = nil
+            } catch {
+                modelInstallError = error.localizedDescription
+            }
+        }
+
+        if let prompt = argumentValue(after: "--auto-send-prompt", in: arguments) {
+            composerText = prompt
+            sendMessage(in: chat)
+        }
+
         return true
+    }
+
+    private func modelArtifactFiles(in directory: URL) throws -> [String] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var files: [String] = []
+        for case let fileURL as URL in enumerator {
+            let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            files.append(String(fileURL.path(percentEncoded: false).dropFirst(directory.path(percentEncoded: false).count + 1)))
+        }
+        return files.sorted()
+    }
+
+    private func argumentValue(after flag: String, in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: flag) else { return nil }
+        let valueIndex = arguments.index(after: index)
+        guard valueIndex < arguments.endIndex else { return nil }
+        return arguments[valueIndex]
     }
 }
 
@@ -397,6 +452,13 @@ private struct MessageBubble: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier(message.role == .user ? "user-message" : "assistant-message")
+
+            if let errorDescription = message.errorDescription {
+                Text(errorDescription)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("assistant-message-error")
+            }
 
             if message.isStopped {
                 Text("Stopped")

@@ -301,6 +301,38 @@ struct tinychatTests {
         #expect(cache.baseModelStatus().state == .missing)
     }
 
+    @Test func coreAIRealModelEmitsNonWhitespaceWhenEnabled() async throws {
+        guard ProcessInfo.processInfo.environment["TINYCHAT_RUN_REAL_MODEL_UNIT_TEST"] == "1" else { return }
+
+        let fixture = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: ".build/coreai-exports/qwen3-0.6b-macos/qwen3_0_6b_4bit_dynamic", directoryHint: .isDirectory)
+
+        let engine = CoreAIChatEngine(modelURL: fixture)
+        var text = ""
+        var reasoning = ""
+        for try await event in engine.responseEvents(
+            for: ChatRequest(
+                prompt: "Say hello in one short sentence.",
+                thinkingEnabled: false,
+                priorMessages: []
+            )
+        ) {
+            switch event {
+            case .text(let delta):
+                text += delta
+            case .reasoning(let delta):
+                reasoning += delta
+            }
+        }
+
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Issue.record("CoreAI emitted text=\(text.debugDescription), reasoning=\(reasoning.debugDescription)")
+        }
+        #expect(!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
     // ── Helpers ──
 
     private func tempRoot() -> URL {

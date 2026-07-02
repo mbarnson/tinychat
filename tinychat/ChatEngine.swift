@@ -29,27 +29,35 @@ enum ChatStreamEvent: Sendable, Equatable {
 }
 
 protocol ChatEngine: Sendable {
-    func responseEvents(for request: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error>
+    nonisolated func responseEvents(for request: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error>
 }
 
 struct DeterministicChatEngine: ChatEngine {
-    func responseEvents(for request: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
+    nonisolated func responseEvents(for request: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            _ = Task {
-                if request.thinkingEnabled {
-                    continuation.yield(.reasoning("Checked the deterministic test path."))
+            let task = Task.detached {
+                do {
+                    if request.thinkingEnabled {
+                        continuation.yield(.reasoning("Checked the deterministic test path."))
+                    }
+
+                    continuation.yield(.text("Hello"))
+
+                    for chunk in [" from", " tinychat."] {
+                        try await Task.sleep(for: .milliseconds(1_500))
+                        try Task.checkCancellation()
+                        continuation.yield(.text(chunk))
+                    }
+
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
                 }
-
-                continuation.yield(.text("Hello"))
-
-                for chunk in [" from", " tinychat."] {
-                    try await Task.sleep(for: .milliseconds(1_500))
-                    try Task.checkCancellation()
-                    continuation.yield(.text(chunk))
-                }
-
-                continuation.finish()
             }
+
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 }
@@ -57,7 +65,7 @@ struct DeterministicChatEngine: ChatEngine {
 struct MissingModelChatEngine: ChatEngine {
     let modelName: String
 
-    func responseEvents(for request: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
+    nonisolated func responseEvents(for request: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             continuation.finish(throwing: ChatEngineError.modelMissing(modelName))
         }
@@ -99,14 +107,21 @@ struct ChatEngineFactory {
 struct CoreAIChatEngine: ChatEngine {
     let modelURL: URL
 
-    func responseEvents(for request: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
+    nonisolated func responseEvents(for request: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            _ = Task {
+            let task = Task.detached {
                 do {
 #if canImport(CoreAILanguageModels) && canImport(FoundationModels)
                     let model = try await CoreAILanguageModel(resourcesAt: modelURL)
-                    let session = LanguageModelSession(model: model)
-                    let stream = session.streamResponse(to: prompt(for: request))
+                    let session = LanguageModelSession(model: model, transcript: transcript(for: request))
+                    let stream = session.streamResponse(
+                        to: promptText(for: request),
+                        options: GenerationOptions(
+                            samplingMode: .greedy,
+                            temperature: 0,
+                            maximumResponseTokens: 64
+                        )
+                    )
                     var emittedReasoning = ""
                     var emittedText = ""
 
@@ -149,38 +164,51 @@ struct CoreAIChatEngine: ChatEngine {
                     continuation.finish(throwing: error)
                 }
             }
+
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
-    private func parsedDelta(from emitted: String, to latest: String) -> String {
+    nonisolated private func parsedDelta(from emitted: String, to latest: String) -> String {
         if latest.hasPrefix(emitted) {
             return String(latest.dropFirst(emitted.count))
         }
         return latest
     }
 
-    private func prompt(for request: ChatRequest) -> String {
-        var lines = [String]()
-        lines.append(request.thinkingEnabled ? "/think" : "/no_think")
-        lines.append("You are a helpful local assistant inside tinychat.")
+#if canImport(CoreAILanguageModels) && canImport(FoundationModels)
+    nonisolated private func transcript(for request: ChatRequest) -> Transcript {
+        var entries: [Transcript.Entry] = [
+            .instructions(
+                Transcript.Instructions(
+                    segments: [.text(.init(content: "You are a helpful local assistant inside tinychat."))],
+                    toolDefinitions: []
+                )
+            )
+        ]
 
-        for message in request.priorMessages {
+        for message in request.priorMessages.dropLast() {
+            let segment = Transcript.Segment.text(.init(content: message.text))
             switch message.role {
             case .user:
-                lines.append("User: \(message.text)")
+                entries.append(.prompt(Transcript.Prompt(segments: [segment])))
             case .assistant:
-                lines.append("Assistant: \(message.text)")
+                entries.append(.response(Transcript.Response(segments: [segment])))
             }
         }
 
-        lines.append("User: \(request.prompt)")
-        lines.append("Assistant:")
-        return lines.joined(separator: "\n")
+        return Transcript(entries: entries)
+    }
+#endif
+
+    nonisolated private func promptText(for request: ChatRequest) -> String {
+        "\(request.thinkingEnabled ? "/think" : "/no_think")\n\(request.prompt)"
     }
 }
 
+
 struct ReasoningParser {
-    static func split(_ content: String) -> (reasoning: String?, text: String) {
+    nonisolated static func split(_ content: String) -> (reasoning: String?, text: String) {
         guard let openRange = content.range(of: "<think>"),
               let closeRange = content.range(of: "</think>", range: openRange.upperBound..<content.endIndex)
         else {
