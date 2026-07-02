@@ -25,6 +25,8 @@ struct ContentView: View {
     @State private var generationTask: Task<Void, Never>?
     @State private var errorMessage: String?
     @State private var modelStatus = ModelCache().baseModelStatus()
+    @State private var isInstallingModel = false
+    @State private var modelInstallError: String?
 
     private var selectedChat: Chat? {
         if let selectedChatID, let chat = chats.first(where: { $0.id == selectedChatID }) {
@@ -124,10 +126,31 @@ struct ContentView: View {
                 Label("Qwen3 0.6B not installed", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("model-status-missing")
+
+                if allowsFixtureModelInstall {
+                    Button(isInstallingModel ? "Installing..." : "Install Fixture") {
+                        installFixtureModel()
+                    }
+                    .disabled(isInstallingModel)
+                    .accessibilityIdentifier("install-fixture-model-button")
+                }
             case .installed:
                 Label("Qwen3 0.6B installed", systemImage: "checkmark.circle")
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("model-status-installed")
+
+                Button("Delete Model") {
+                    deleteInstalledModel()
+                }
+                .disabled(isGenerating)
+                .accessibilityIdentifier("delete-model-button")
+            }
+
+            if let modelInstallError {
+                Text(modelInstallError)
+                    .foregroundStyle(.red)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("model-install-error")
             }
 
             Spacer()
@@ -192,6 +215,50 @@ struct ContentView: View {
         modelContext.insert(chat)
         selectedChatID = chat.id
         try? modelContext.save()
+    }
+
+    private var allowsFixtureModelInstall: Bool {
+        ProcessInfo.processInfo.arguments.contains("--use-fixture-model-installer")
+    }
+
+    private func installFixtureModel() {
+        guard !isInstallingModel else { return }
+
+        isInstallingModel = true
+        modelInstallError = nil
+
+        do {
+            let cache = ModelCache()
+            let source = cache.appSupportDirectory
+                .appending(path: "FixtureModelSource", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+            let marker = source.appending(path: "model.mil", directoryHint: .notDirectory)
+            if !FileManager.default.fileExists(atPath: marker.path(percentEncoded: false)) {
+                try Data("fixture".utf8).write(to: marker)
+            }
+            let manifest = ModelArtifactManifest(
+                version: "fixture",
+                sourceURL: source,
+                expectedFiles: ["model.mil"]
+            )
+            try cache.installBaseModel(from: manifest)
+            modelStatus = cache.baseModelStatus()
+        } catch {
+            modelInstallError = error.localizedDescription
+        }
+
+        isInstallingModel = false
+    }
+
+    private func deleteInstalledModel() {
+        do {
+            let cache = ModelCache()
+            try cache.removeBaseModel()
+            modelStatus = cache.baseModelStatus()
+            modelInstallError = nil
+        } catch {
+            modelInstallError = error.localizedDescription
+        }
     }
 
     private func sendMessage(in chat: Chat) {

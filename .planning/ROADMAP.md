@@ -31,9 +31,9 @@ Acceptance:
 
 ## Phase 02 — Manifest, ZIP download, and model cache lifecycle
 
-Status: planned
+Status: in progress — offline fixture install path implemented; ZIP/network downloader still planned
 
-Purpose: implement the first-run model download contract against fixture assets first, then real GitHub Release artifacts.
+Purpose: implement the first-run model download contract against fixture assets first, then real GitHub Release artifacts. Checkpoint 2026-07-02: `ModelCache` now has manifest validation, atomic install, metadata writing, delete, and fixture-launch support; `ContentView` exposes install/delete actions for fixture UI tests; offline unit/UI tests pass on this macOS 26.6 host with `CoreAILM` temporarily unlinked plus deployment-target overrides, and linked Xcode 27 beta build-for-testing also passes.
 
 Acceptance:
 

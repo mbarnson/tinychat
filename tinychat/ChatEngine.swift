@@ -101,22 +101,48 @@ struct CoreAIChatEngine: ChatEngine {
 
     func responseEvents(for request: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            _ = Task {
                 do {
-                    let content = try await respond(to: request)
-                    let parsed = ReasoningParser.split(content)
+#if canImport(CoreAILanguageModels) && canImport(FoundationModels)
+                    let model = try await CoreAILanguageModel(resourcesAt: modelURL)
+                    let session = LanguageModelSession(model: model)
+                    let stream = session.streamResponse(to: prompt(for: request))
+                    var emittedReasoning = ""
+                    var emittedText = ""
 
-                    if let reasoning = parsed.reasoning, !reasoning.isEmpty {
-                        continuation.yield(.reasoning(reasoning))
-                    }
-
-                    for chunk in parsed.text.chunkedForDisplay() {
+                    for try await snapshot in stream {
                         try Task.checkCancellation()
-                        continuation.yield(.text(chunk))
-                        try await Task.sleep(for: .milliseconds(10))
+
+                        if request.thinkingEnabled {
+                            guard snapshot.content.contains("</think>") else { continue }
+
+                            let parsed = ReasoningParser.split(snapshot.content)
+                            if let reasoning = parsed.reasoning {
+                                let delta = parsedDelta(from: emittedReasoning, to: reasoning)
+                                if !delta.isEmpty {
+                                    continuation.yield(.reasoning(delta))
+                                    emittedReasoning = reasoning
+                                }
+                            }
+
+                            let textDelta = parsedDelta(from: emittedText, to: parsed.text)
+                            if !textDelta.isEmpty {
+                                continuation.yield(.text(textDelta))
+                                emittedText = parsed.text
+                            }
+                        } else {
+                            let textDelta = parsedDelta(from: emittedText, to: snapshot.content)
+                            if !textDelta.isEmpty {
+                                continuation.yield(.text(textDelta))
+                                emittedText = snapshot.content
+                            }
+                        }
                     }
 
                     continuation.finish()
+#else
+                    throw ChatEngineError.coreAIUnavailable
+#endif
                 } catch is CancellationError {
                     continuation.finish()
                 } catch {
@@ -126,15 +152,11 @@ struct CoreAIChatEngine: ChatEngine {
         }
     }
 
-    private func respond(to request: ChatRequest) async throws -> String {
-#if canImport(CoreAILanguageModels) && canImport(FoundationModels)
-        let model = try await CoreAILanguageModel(resourcesAt: modelURL)
-        let session = LanguageModelSession(model: model)
-        let response = try await session.respond(to: prompt(for: request))
-        return response.content
-#else
-        throw ChatEngineError.coreAIUnavailable
-#endif
+    private func parsedDelta(from emitted: String, to latest: String) -> String {
+        if latest.hasPrefix(emitted) {
+            return String(latest.dropFirst(emitted.count))
+        }
+        return latest
     }
 
     private func prompt(for request: ChatRequest) -> String {
@@ -174,17 +196,3 @@ struct ReasoningParser {
     }
 }
 
-private extension String {
-    func chunkedForDisplay() -> [String] {
-        guard !isEmpty else { return [] }
-
-        var chunks = [String]()
-        var index = startIndex
-        while index < endIndex {
-            let next = self.index(index, offsetBy: 24, limitedBy: endIndex) ?? endIndex
-            chunks.append(String(self[index..<next]))
-            index = next
-        }
-        return chunks
-    }
-}
