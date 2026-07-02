@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftData
+import CryptoKit
 import Testing
 @testable import tinychat
 
@@ -232,6 +233,175 @@ struct tinychatTests {
         }
     }
 
+    // ── Install: ZIP download path ──
+
+    @Test @MainActor func manifestArtifactReturnsMatchingPlatform() throws {
+        let artifact = ModelReleaseArtifact(
+            version: "1.0.0",
+            platform: ModelCache.platformDirectoryName,
+            archiveURL: URL(string: "https://example.com/m.zip")!,
+            archiveSHA256: "abc",
+            byteSize: 0,
+            expandedDirectoryName: "model",
+            expectedFiles: ["weights.gguf"]
+        )
+        let manifest = ModelReleaseManifest(artifacts: [artifact])
+
+        let matched = try manifest.artifact()
+        #expect(matched.version == "1.0.0")
+    }
+
+    @Test @MainActor func manifestArtifactThrowsForWrongPlatform() throws {
+        let artifact = ModelReleaseArtifact(
+            version: "1.0.0",
+            platform: "Android",
+            archiveURL: URL(string: "https://example.com/m.zip")!,
+            archiveSHA256: "abc",
+            byteSize: 0,
+            expandedDirectoryName: "model",
+            expectedFiles: ["weights.gguf"]
+        )
+        let manifest = ModelReleaseManifest(artifacts: [artifact])
+
+        #expect(throws: ModelReleaseManifestError.noArtifact(platform: ModelCache.platformDirectoryName)) {
+            try manifest.artifact()
+        }
+    }
+
+    @MainActor
+    @Test func installZipArtifactVerifiesAndInstalls() async throws {
+        let root = tempRoot()
+
+        let zipData = makeZipWithEntry(name: "model/weights.gguf", data: "weights".data(using: .utf8)!)
+        let zipURL = root.appending(path: "model.zip")
+        try zipData.write(to: zipURL)
+        let sha = dataSHA256Hex(zipData)
+
+        let manifest = ModelReleaseManifest(artifacts: [ModelReleaseArtifact(
+            version: "2.0.0",
+            archiveURL: zipURL,
+            archiveSHA256: sha,
+            byteSize: Int64(zipData.count),
+            expandedDirectoryName: "model",
+            expectedFiles: ["weights.gguf"]
+        )])
+
+        let cache = ModelCache(appSupportOverride: root)
+        let manager = ModelDownloadManager(cache: cache)
+
+        let status = try await manager.installBaseModel(from: manifest)
+
+        #expect(status.isInstalled == true)
+        #expect(status.modelID == ModelCache.baseModelID)
+
+        let modelDir = cache.baseModelDirectory
+        #expect(FileManager.default.fileExists(atPath: modelDir.path))
+
+        let weightsURL = modelDir.appending(path: "weights.gguf")
+        #expect(FileManager.default.fileExists(atPath: weightsURL.path))
+
+        let metaURL = modelDir.appending(path: ModelCache.metadataFileName)
+        #expect(FileManager.default.fileExists(atPath: metaURL.path))
+        let metaJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: metaURL)) as! [String: Any]
+        #expect(metaJSON["version"] as? String == "2.0.0")
+        #expect((metaJSON["sourceURL"] as? String)?.contains("/expanded/model") == true)
+    }
+
+    @MainActor
+    @Test func installZipArtifactRejectsSHA256Mismatch() async {
+        let root = tempRoot()
+
+        let zipData = makeZipWithEntry(name: "model/weights.gguf", data: "weights".data(using: .utf8)!)
+        let zipURL = root.appending(path: "model.zip")
+        try? zipData.write(to: zipURL)
+
+        let manifest = ModelReleaseManifest(artifacts: [ModelReleaseArtifact(
+            version: "1.0.0",
+            archiveURL: zipURL,
+            archiveSHA256: "0000000000000000000000000000000000000000000000000000000000000000",
+            byteSize: Int64(zipData.count),
+            expandedDirectoryName: "model",
+            expectedFiles: ["weights.gguf"]
+        )])
+
+        let cache = ModelCache(appSupportOverride: root)
+        let manager = ModelDownloadManager(cache: cache)
+
+        await #expect(throws: ModelDownloadError.sha256Mismatch(
+            expected: "0000000000000000000000000000000000000000000000000000000000000000",
+            actual: dataSHA256Hex(zipData)
+        )) {
+            try await manager.installBaseModel(from: manifest)
+        }
+
+        #expect(cache.baseModelStatus().state == .missing)
+    }
+
+    @MainActor
+    @Test func installZipArtifactRejectsUnsafeZipEntry() async {
+        let root = tempRoot()
+
+        let zipData = makeZipWithEntry(name: "../escape.txt", data: "pwned".data(using: .utf8)!)
+        let zipURL = root.appending(path: "bad.zip")
+        try? zipData.write(to: zipURL)
+        let sha = dataSHA256Hex(zipData)
+
+        let manifest = ModelReleaseManifest(artifacts: [ModelReleaseArtifact(
+            version: "1.0.0",
+            archiveURL: zipURL,
+            archiveSHA256: sha,
+            byteSize: Int64(zipData.count),
+            expandedDirectoryName: "model",
+            expectedFiles: ["weights.gguf"]
+        )])
+
+        let cache = ModelCache(appSupportOverride: root)
+        let manager = ModelDownloadManager(cache: cache)
+
+        await #expect(throws: ModelDownloadError.unsafeZipEntry("../escape.txt")) {
+            try await manager.installBaseModel(from: manifest)
+        }
+
+        // Ensure nothing leaked past extraction boundary
+        let escapeInRoot = root.appending(path: "escape.txt")
+        #expect(!FileManager.default.fileExists(atPath: escapeInRoot.path))
+        let modelDir = cache.baseModelDirectory
+        #expect(!FileManager.default.fileExists(atPath: modelDir.path))
+    }
+
+    @MainActor
+    @Test func installZipArtifactRejectsDeflateCompression() async {
+        let root = tempRoot()
+
+        var zipData = makeZipWithEntry(name: "model/weights.gguf", data: "weights".data(using: .utf8)!)
+        // Flip method bytes at offset 8..9 from 0 (store) -> 8 (deflate)
+        zipData[8] = 0x08
+        zipData[9] = 0x00
+
+        let sha = dataSHA256Hex(zipData)
+        let zipURL = root.appending(path: "deflate.zip")
+        try? zipData.write(to: zipURL)
+
+        let manifest = ModelReleaseManifest(artifacts: [ModelReleaseArtifact(
+            version: "1.0.0",
+            archiveURL: zipURL,
+            archiveSHA256: sha,
+            byteSize: Int64(zipData.count),
+            expandedDirectoryName: "model",
+            expectedFiles: ["weights.gguf"]
+        )])
+
+        let cache = ModelCache(appSupportOverride: root)
+        let manager = ModelDownloadManager(cache: cache)
+
+        await #expect(throws: ModelDownloadError.unsupportedZipCompression(method: 8)) {
+            try await manager.installBaseModel(from: manifest)
+        }
+
+        let modelDir = cache.baseModelDirectory
+        #expect(!FileManager.default.fileExists(atPath: modelDir.path))
+    }
+
     // ── Install: replacement of stale contents ──
 
     @Test @MainActor func installReplacesPriorModelContents() throws {
@@ -336,8 +506,10 @@ struct tinychatTests {
     // ── Helpers ──
 
     private func tempRoot() -> URL {
-        FileManager.default.temporaryDirectory
+        let root = FileManager.default.temporaryDirectory
             .appending(path: "cache-test-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
     }
 
     private func makeFixture(root: URL, extraFiles: [String] = []) -> URL {
@@ -356,6 +528,73 @@ struct tinychatTests {
         try? contents.data(using: .utf8)?.write(to: file)
     }
 
+
+    private func makeZipWithEntry(name: String, data: Data) -> Data {
+        let nameBytes = Array(name.utf8)
+        let fileNameLength = UInt16(nameBytes.count)
+        let extraLength: UInt16 = 0
+        let compressedSize = UInt32(data.count)
+
+        var zip = Data()
+        zip.append(contentsOf: leBytes(from: UInt32(0x0403_4B50))) // local file header signature
+        zip.append(contentsOf: leBytes(from: UInt16(0x0014)))       // version needed
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // flags
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // compression method (store)
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // mod time
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // mod date
+        zip.append(contentsOf: leBytes(from: UInt32(0)))            // crc-32
+        zip.append(contentsOf: leBytes(from: compressedSize))       // compressed size
+        zip.append(contentsOf: leBytes(from: compressedSize))       // uncompressed size
+        zip.append(contentsOf: leBytes(from: fileNameLength))       // file name length
+        zip.append(contentsOf: leBytes(from: extraLength))          // extra field length
+        zip.append(contentsOf: nameBytes)
+        zip.append(data)
+
+        let centralDirOffset = UInt32(zip.count)
+        zip.append(contentsOf: leBytes(from: UInt32(0x0201_4B50))) // central directory signature
+        zip.append(contentsOf: leBytes(from: UInt16(0x0014)))       // version made by
+        zip.append(contentsOf: leBytes(from: UInt16(0x0014)))       // version needed
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // flags
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // compression method
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // mod time
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // mod date
+        zip.append(contentsOf: leBytes(from: UInt32(0)))            // crc-32
+        zip.append(contentsOf: leBytes(from: compressedSize))       // compressed size
+        zip.append(contentsOf: leBytes(from: compressedSize))       // uncompressed size
+        zip.append(contentsOf: leBytes(from: fileNameLength))       // file name length
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // extra field length
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // comment length
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // disk number start
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // internal attrs
+        zip.append(contentsOf: leBytes(from: UInt32(0)))            // external attrs
+        zip.append(contentsOf: leBytes(from: centralDirOffset))     // local header offset
+        zip.append(contentsOf: nameBytes)
+
+        let centralDirSize = UInt32(zip.count - Int(centralDirOffset))
+        zip.append(contentsOf: leBytes(from: UInt32(0x0605_4B50))) // EOCD signature
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // disk number
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // CD disk start
+        zip.append(contentsOf: leBytes(from: UInt16(1)))            // CD records on disk
+        zip.append(contentsOf: leBytes(from: UInt16(1)))            // total CD records
+        zip.append(contentsOf: leBytes(from: centralDirSize))       // CD size
+        zip.append(contentsOf: leBytes(from: centralDirOffset))     // CD offset
+        zip.append(contentsOf: leBytes(from: UInt16(0)))            // comment length
+
+        return zip
+    }
+
+    private func leBytes(from value: UInt16) -> [UInt8] {
+        withUnsafeBytes(of: value.littleEndian) { Array($0) }
+    }
+
+    private func leBytes(from value: UInt32) -> [UInt8] {
+        withUnsafeBytes(of: value.littleEndian) { Array($0) }
+    }
+
+    private func dataSHA256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     @Test @MainActor func reasoningParserSeparatesThinkBlock() {
         let parsed = ReasoningParser.split("<think>Check carefully.</think>Final answer.")
 
@@ -363,3 +602,4 @@ struct tinychatTests {
         #expect(parsed.text == "Final answer.")
     }
 }
+

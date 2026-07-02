@@ -16,35 +16,35 @@ Date: 2026-07-02
   - installed state: `Delete Model`.
 - Adjusted deterministic streaming to avoid surfacing stale `<think>` text while the closing tag is incomplete.
 - Added Swift Testing coverage for manifest validation, installation, replacement, metadata persistence, deletion, and missing/installed states.
+- Added `ModelReleaseManifest` / `ModelReleaseArtifact` selection for platform-specific release artifacts.
+- Added `ModelDownloadManager` to load release manifests, copy/download model ZIPs, verify byte size and SHA-256, extract stored ZIP entries safely, check disk space, and install atomically through `ModelCache`.
+- Added first-run download UI support: `--model-release-manifest-url` exposes a `Download Model` action, progress text, and install error reporting while reusing the production cache path.
+- Added a tiny ZIP fixture UI test that clicks the visible `Download Model` button and verifies the installed model status without relying on a real model artifact.
 
 ## Verification commands and results
 
-### macOS executable tests with CoreAILM temporarily unlinked
+### Linked macOS tests under Xcode 27 beta
 
-The committed app target remains linked to `CoreAILM` for Xcode/SDK 27 builds. This workstation is still running macOS 26.6, so macOS 27 deployment-target test bundles cannot launch here. To execute the offline cache/unit/UI suite on this host, `CoreAILM` was temporarily unlinked and deployment targets were overridden for the test invocation, then the link was restored:
-
+The committed app target remains linked to `CoreAILM`, and the workstation is now booted on macOS 27. The offline cache/unit/UI suite runs with no deployment-target overrides or temporary unlinking. The real Qwen3 0.6B UI smoke is now gated behind `TINYCHAT_RUN_REAL_MODEL_UI_TEST=1` so the fast default suite remains fixture-only:
 ```bash
 DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  scripts/set-coreailm-link.py disable && \
-  DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
   xcodebuild -project tinychat.xcodeproj -scheme tinychat \
   -destination 'platform=macOS' \
-  -derivedDataPath .build/DerivedData \
-  MACOSX_DEPLOYMENT_TARGET=26.5 \
-  IPHONEOS_DEPLOYMENT_TARGET=26.5 \
-  test; \
-  DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
-  scripts/set-coreailm-link.py enable
+  -derivedDataPath .build/DerivedDataBeta \
+  test
 ```
 
 Result: passed.
 
-Observed result:
+Observed result from `.build/DerivedDataBeta/Logs/Test/Test-tinychat-2026.07.02_04-57-24--0700.xcresult`:
 
 ```text
 ** TEST SUCCEEDED **
-tinychatTests: 14 passed
-tinychatUITests: 4 executed, 1 real-model smoke skipped by gate
+passedTests: 24
+skippedTests: 1
+failedTests: 0
+tinychatUITests.testFirstRunDownloadButtonUsesManifest passed
+tinychatUITests.testRealModelSmokeWhenEnabled skipped without TINYCHAT_RUN_REAL_MODEL_UI_TEST=1
 ```
 
 ### macOS build-for-testing under Xcode 27 beta with CoreAILM linked
@@ -85,13 +85,15 @@ This warning is unrelated to the cache lifecycle work; the app has no AppIntents
 - Install copies all fixture files needed by the manifest.
 - Reinstall replaces stale installed files atomically from the caller perspective.
 - Delete transitions installed back to missing.
+- Release manifest selection picks the artifact matching `ModelCache.platformDirectoryName`.
+- ZIP artifact install verifies SHA-256 before extraction.
+- ZIP artifact install rejects SHA-256 mismatches.
+- ZIP artifact install rejects unsupported deflate compression.
+- ZIP artifact install rejects unsafe path traversal entries.
+- First-run download UI exposes `Download Model`, installs from a manifest-backed ZIP fixture, and transitions to installed status after a click.
 
 ## Still remaining for Phase 02
 
-- Static manifest file/schema committed as fixture asset.
-- ZIP creation/extraction path.
-- SHA-256 verification.
-- Foreground progress, cancel, retry, and disk-space checks.
-- Real GitHub Release manifest/artifact URL support.
+- Real GitHub Release manifest/artifact URL support with production artifact locations.
+- Foreground cancel and retry controls for long downloads.
 - Model panel listing 0.6B and 4B availability/current/provenance/actions.
-- UI test that drives fixture install/delete through the visible model status controls.

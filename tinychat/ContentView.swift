@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var modelStatus = ModelCache().baseModelStatus()
     @State private var isInstallingModel = false
     @State private var modelInstallError: String?
+    @State private var modelDownloadProgress: ModelDownloadProgress?
 
     private var selectedChat: Chat? {
         if let selectedChatID, let chat = chats.first(where: { $0.id == selectedChatID }) {
@@ -134,6 +135,14 @@ struct ContentView: View {
                     .disabled(isInstallingModel)
                     .accessibilityIdentifier("install-fixture-model-button")
                 }
+
+                if let modelReleaseManifestURL {
+                    Button(isInstallingModel ? "Downloading..." : "Download Model") {
+                        downloadReleaseModel(manifestURL: modelReleaseManifestURL)
+                    }
+                    .disabled(isInstallingModel)
+                    .accessibilityIdentifier("download-model-button")
+                }
             case .installed:
                 Label("Qwen3 0.6B installed", systemImage: "checkmark.circle")
                     .foregroundStyle(.secondary)
@@ -151,6 +160,13 @@ struct ContentView: View {
                     .foregroundStyle(.red)
                     .lineLimit(1)
                     .accessibilityIdentifier("model-install-error")
+            }
+
+            if let modelDownloadProgress {
+                Text(modelDownloadProgressLabel(modelDownloadProgress))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("model-download-progress")
             }
 
             Spacer()
@@ -219,6 +235,74 @@ struct ContentView: View {
 
     private var allowsFixtureModelInstall: Bool {
         ProcessInfo.processInfo.arguments.contains("--use-fixture-model-installer")
+    }
+
+    private var modelReleaseManifestURL: URL? {
+        guard let value = argumentValue(
+            after: "--model-release-manifest-url",
+            in: ProcessInfo.processInfo.arguments
+        ) else {
+            return nil
+        }
+
+        if value.hasPrefix("http://") || value.hasPrefix("https://") {
+            return URL(string: value)
+        }
+        return URL(fileURLWithPath: value, isDirectory: false)
+    }
+
+    private func downloadReleaseModel(manifestURL: URL) {
+        guard !isInstallingModel else { return }
+
+        isInstallingModel = true
+        modelInstallError = nil
+        modelDownloadProgress = .init(phase: .preparing, completedBytes: 0, totalBytes: nil)
+
+        Task.detached {
+            do {
+                let manifest = try await Self.loadReleaseManifest(from: manifestURL)
+                let status = try await ModelDownloadManager().installBaseModel(from: manifest) { progress in
+                    Task { @MainActor in
+                        modelDownloadProgress = progress
+                    }
+                }
+                await MainActor.run {
+                    modelStatus = status
+                    modelDownloadProgress = nil
+                    isInstallingModel = false
+                }
+            } catch {
+                await MainActor.run {
+                    modelInstallError = error.localizedDescription
+                    isInstallingModel = false
+                }
+            }
+        }
+    }
+
+    private static func loadReleaseManifest(from url: URL) async throws -> ModelReleaseManifest {
+        let data: Data
+        if url.isFileURL {
+            data = try Data(contentsOf: url)
+        } else {
+            let (remoteData, response) = try await URLSession.shared.data(from: url)
+            if let httpResponse = response as? HTTPURLResponse, !(200..<300).contains(httpResponse.statusCode) {
+                throw ModelDownloadError.downloadFailed(statusCode: httpResponse.statusCode)
+            }
+            data = remoteData
+        }
+        return try JSONDecoder().decode(ModelReleaseManifest.self, from: data)
+    }
+
+    private func modelDownloadProgressLabel(_ progress: ModelDownloadProgress) -> String {
+        let phase = progress.phase.rawValue.capitalized
+        guard let totalBytes = progress.totalBytes, totalBytes > 0 else {
+            return "\(phase)…"
+        }
+
+        let downloaded = ByteCountFormatter.string(fromByteCount: progress.completedBytes, countStyle: .file)
+        let total = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+        return "\(phase) \(downloaded) of \(total)"
     }
 
     private func installFixtureModel() {
@@ -370,6 +454,11 @@ struct ContentView: View {
         if arguments.contains("--disable-thinking") {
             chat.thinkingEnabled = false
             try? modelContext.save()
+        }
+
+        if arguments.contains("--reset-model-cache") {
+            try? ModelCache().removeBaseModel()
+            modelStatus = ModelCache().baseModelStatus()
         }
 
         if arguments.contains("--install-fixture-model"),
