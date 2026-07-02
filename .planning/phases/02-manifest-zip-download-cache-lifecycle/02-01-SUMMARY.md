@@ -19,7 +19,7 @@ Date: 2026-07-02
 - Added `ModelReleaseManifest` / `ModelReleaseArtifact` selection for platform-specific release artifacts.
 - Added `ModelDownloadManager` to load release manifests, copy/download model ZIPs, verify byte size and SHA-256, extract stored ZIP entries safely, check disk space, and install atomically through `ModelCache`.
 - Added first-run download UI support: `--model-release-manifest-url` exposes a `Download Model` action, progress text, and install error reporting while reusing the production cache path.
-- Added a tiny ZIP fixture UI test that clicks the visible `Download Model` button and verifies the installed model status without relying on a real model artifact.
+- Added a tiny ZIP fixture UI test that clicks the visible `Download Model` button, verifies installed model status, exercises `Delete Model`, and runs a teardown reset so fixture artifacts do not pollute the real app cache.
 
 ## Verification commands and results
 
@@ -36,14 +36,14 @@ DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer \
 
 Result: passed.
 
-Observed result from `.build/DerivedDataBeta/Logs/Test/Test-tinychat-2026.07.02_04-57-24--0700.xcresult`:
+Observed result from `.build/DerivedDataBeta/Logs/Test/Test-tinychat-2026.07.02_09-07-04--0700.xcresult`:
 
 ```text
 ** TEST SUCCEEDED **
 passedTests: 24
 skippedTests: 1
 failedTests: 0
-tinychatUITests.testFirstRunDownloadButtonUsesManifest passed
+tinychatUITests.testFirstRunDownloadButtonUsesManifest passed and left no qwen3-0.6b/macOS fixture cache directory behind
 tinychatUITests.testRealModelSmokeWhenEnabled skipped without TINYCHAT_RUN_REAL_MODEL_UI_TEST=1
 ```
 
@@ -90,7 +90,7 @@ This warning is unrelated to the cache lifecycle work; the app has no AppIntents
 - ZIP artifact install rejects SHA-256 mismatches.
 - ZIP artifact install rejects unsupported deflate compression.
 - ZIP artifact install rejects unsafe path traversal entries.
-- First-run download UI exposes `Download Model`, installs from a manifest-backed ZIP fixture, and transitions to installed status after a click.
+- First-run download UI exposes `Download Model`, installs from a manifest-backed ZIP fixture, transitions to installed status after a click, exercises `Delete Model`, and verifies the fixture cache is absent after the suite.
 
 ## Still remaining for Phase 02
 
