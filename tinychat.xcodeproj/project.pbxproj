@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		9D91F0532FF5F245009E9EF7 /* CoreAILM in Frameworks */ = {isa = PBXBuildFile; productRef = 9D91F0522FF5F245009E9EF7 /* CoreAILM */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		9D91F02E2FF5F245009E9EF7 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -65,6 +69,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9D91F0532FF5F245009E9EF7 /* CoreAILM in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -125,6 +130,7 @@
 			);
 			name = tinychat;
 			packageProductDependencies = (
+				9D91F0522FF5F245009E9EF7 /* CoreAILM */,
 			);
 			productName = tinychat;
 			productReference = 9D91F01C2FF5F245009E9EF7 /* tinychat.app */;

@@ -35,7 +35,7 @@ protocol ChatEngine: Sendable {
 struct DeterministicChatEngine: ChatEngine {
     func responseEvents(for request: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            _ = Task {
                 if request.thinkingEnabled {
                     continuation.yield(.reasoning("Checked the deterministic test path."))
                 }
