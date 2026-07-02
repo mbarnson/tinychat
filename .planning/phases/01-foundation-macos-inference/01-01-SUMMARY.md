@@ -98,21 +98,25 @@ The Qwen3 0.6B artifact export and App Support seed succeeded, but the app targe
 
 Current app code keeps the `CoreAIChatEngine` wrapper in place behind `canImport(...)`, and the project retains the Apple `coreai-models` package reference plus `CoreAILM` product reference, but the target product dependency is intentionally not linked in this checkpoint so the app and tests remain buildable on this machine. Re-enable the `CoreAILM` target product dependency under Xcode/SDK 27 before running the real seeded-model smoke test.
 
+Update while waiting for Xcode 27 Beta 2:
+
+- Added `scripts/set-coreailm-link.py enable|disable` to flip the app target's `CoreAILM` product dependency and Frameworks phase when SDK 27 is available. Verified `enable && disable` round-trips `tinychat.xcodeproj/project.pbxproj` byte-for-byte.
+- Added `testRealModelSmokeWhenEnabled`, gated by `TINYCHAT_RUN_REAL_MODEL_UI_TEST=1`. It launches without the deterministic engine, requires the seeded model status, sends one prompt, and waits for non-empty assistant UI output. It is skipped by default until `CoreAILM` is linked under Xcode/SDK 27.
+
 ## Deviations from plan
 
 - `CoreAILM` is referenced but not linked into the app target in this checkpoint. Reason: linked builds are blocked by the local Xcode 26.5 SDK versus CoreAI's 27.0+ package platform requirement.
 - The macOS real-model smoke test did not run for the same reason.
 - The macOS and iOS verification commands used deployment-target overrides to 26.5 so this machine could compile and run tests. The project settings remain 27.0+.
+- Default macOS tests now include the gated real-model smoke test as skipped unless `TINYCHAT_RUN_REAL_MODEL_UI_TEST=1` is set.
 - Title generation is prompt-only fallback from the first user message. No auxiliary model title prompt is run yet, avoiding cache/session complexity before real CoreAI inference is verified.
 
 ## Remaining work for Phase 02 / next checkpoint
 
-- Re-enable and verify the `CoreAILM` app target product dependency under Xcode/SDK 27.
-- Run the real macOS seeded-model smoke test:
-  - launch without `--use-deterministic-chat-engine`;
-  - send a short prompt;
-  - verify assistant text becomes non-empty;
-  - do not assert exact prose.
+- After Xcode/SDK 27 is installed, run:
+  - `scripts/set-coreailm-link.py enable`
+  - `TINYCHAT_RUN_REAL_MODEL_UI_TEST=1 xcodebuild -project tinychat.xcodeproj -scheme tinychat -destination 'platform=macOS' -derivedDataPath .build/DerivedData test`
+  - If the linked build fails because CoreAI `main` drifted, inspect `vendor/coreai-models/swift/Sources/CoreAILanguageModels` and adapt the narrow wrapper.
 - Build the manifest/ZIP download/cache lifecycle against fixture assets first.
 - Replace local App Support seeding with the production first-run download flow.
 - Add model provenance/hash/version fields once the static manifest exists.

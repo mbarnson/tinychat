@@ -48,4 +48,31 @@ final class tinychatUITests: XCTestCase {
 
         XCTAssertTrue(relaunched.staticTexts["assistant-message"].waitForExistence(timeout: 5))
     }
+
+    @MainActor
+    func testRealModelSmokeWhenEnabled() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["TINYCHAT_RUN_REAL_MODEL_UI_TEST"] == "1",
+            "Set TINYCHAT_RUN_REAL_MODEL_UI_TEST=1 after linking CoreAILM under Xcode/SDK 27."
+        )
+
+        let app = XCUIApplication()
+        app.launchArguments = ["--reset-chat-state"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["model-status-installed"].waitForExistence(timeout: 5))
+
+        let composer = app.textViews["message-composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        composer.tap()
+        composer.typeText("Say hello in one short sentence.")
+
+        let sendButton = app.buttons["send-button"]
+        XCTAssertTrue(sendButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(sendButton.isEnabled)
+        sendButton.tap()
+
+        let assistantMessage = app.staticTexts["assistant-message"]
+        XCTAssertTrue(assistantMessage.waitForExistence(timeout: 60))
+    }
 }

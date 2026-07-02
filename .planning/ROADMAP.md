@@ -12,7 +12,7 @@ Status: blocked on Xcode/CoreAI SDK 27 for real-model app smoke
 
 Purpose: replace the stock template, establish CoreAI dependency/platform baseline, seed a macOS App Support model cache, and prove real Qwen3 0.6B streaming inference in the beginning of the final chat UI.
 
-Checkpoint 2026-07-02: schema/UI/cache/test infrastructure is implemented; Qwen3 0.6B macOS export and App Support seeding succeeded; macOS deterministic unit/UI tests and generic iOS simulator build pass with local 26.5 deployment overrides. Real app inference remains blocked until `CoreAILM` can be linked under Xcode/SDK 27.
+Checkpoint 2026-07-02: schema/UI/cache/test infrastructure is implemented; Qwen3 0.6B macOS export and App Support seeding succeeded; macOS deterministic unit/UI tests and generic iOS simulator build pass with local 26.5 deployment overrides. Added a skipped-by-default real-model UI smoke test plus `scripts/set-coreailm-link.py` so the `CoreAILM` app target link can be enabled immediately after Xcode/SDK 27 lands. Real app inference remains blocked until that linked build runs under SDK 27.
 
 Plans:
 
