@@ -90,6 +90,30 @@ final class tinychatUITests: XCTestCase {
 
 
     @MainActor
+    func testDownloadDialogListsAvailableModelsWithoutManifest() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--reset-chat-state",
+            "--reset-model-cache",
+        ]
+        app.launch()
+
+        let downloadButton = app.buttons["download-model-button"]
+        XCTAssertTrue(downloadButton.waitForExistence(timeout: 10))
+#if os(macOS)
+        downloadButton.click()
+#else
+        downloadButton.tap()
+#endif
+
+        XCTAssertTrue(app.descendants(matching: .any)["model-download-dialog"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["model-option-qwen3-0.6b"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["model-option-qwen3-4b"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["download-option-qwen3-4b-unavailable"].waitForExistence(timeout: 5))
+    }
+
+
+    @MainActor
     func testFirstRunDownloadButtonUsesManifest() throws {
         let (manifestURL, _) = try createTestManifestAndZip()
         defer { try? FileManager.default.removeItem(at: manifestURL.deletingLastPathComponent()) }
@@ -122,6 +146,29 @@ final class tinychatUITests: XCTestCase {
 #else
         downloadButton.tap()
 #endif
+        let dialog = app.descendants(matching: .any)["model-download-dialog"]
+        guard dialog.waitForExistence(timeout: 10) else {
+            XCTFail("model-download-dialog never appeared after tapping download-model-button; app=\(app.debugDescription)")
+            return
+        }
+
+        let modelOption06b = app.descendants(matching: .any)["model-option-qwen3-0.6b"]
+        guard modelOption06b.waitForExistence(timeout: 5) else {
+            XCTFail("model-option-qwen3-0.6b not visible in dialog; app=\(app.debugDescription)")
+            return
+        }
+        let downloadOption = app.buttons["download-option-qwen3-0.6b"]
+        guard downloadOption.waitForExistence(timeout: 5) else {
+            XCTFail("download-option-qwen3-0.6b not visible in dialog; app=\(app.debugDescription)")
+            return
+        }
+
+#if os(macOS)
+        downloadOption.click()
+#else
+        downloadOption.tap()
+#endif
+
 
         if !app.staticTexts["model-status-installed"].waitForExistence(timeout: 120) {
             let progress = app.staticTexts["model-download-progress"].exists
@@ -130,7 +177,7 @@ final class tinychatUITests: XCTestCase {
             let installError = app.staticTexts["model-install-error"].exists
                 ? app.staticTexts["model-install-error"].label
                 : "no install error label"
-            XCTFail("model-status-installed never appeared after tapping download-model-button; progress=\(progress); \(installError); app=\(app.debugDescription)")
+            XCTFail("model-status-installed never appeared after selecting Qwen3 0.6B from dialog; progress=\(progress); \(installError); app=\(app.debugDescription)")
         }
 
         if app.staticTexts["model-install-error"].exists {

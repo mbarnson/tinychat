@@ -31,9 +31,9 @@ Acceptance:
 
 ## Phase 02 — Manifest, ZIP download, and model cache lifecycle
 
-Status: in progress — manifest ZIP download/cache path implemented against fixture artifacts; production release hosting and model panel still planned
+Status: in progress — manifest ZIP download/cache path and first-run model picker implemented against fixture artifacts; production release hosting and full model panel still planned
 
-Purpose: implement the first-run model download contract against fixture assets first, then real GitHub Release artifacts. Checkpoint 2026-07-02: `ModelCache` now has manifest validation, atomic install, metadata writing, delete, fixture-launch support, platform release-manifest selection, ZIP extraction, SHA-256 verification, disk-space checks, and a first-run `Download Model` UI wired through the production download/cache code path. Fast linked macOS tests pass on the macOS 27 host under `/Applications/Xcode-beta.app`; the real Qwen3 0.6B UI smoke is gated behind `TINYCHAT_RUN_REAL_MODEL_UI_TEST=1`.
+Purpose: implement the first-run model download contract against fixture assets first, then real GitHub Release artifacts. Checkpoint 2026-07-02: `ModelCache` now has manifest validation, atomic install, metadata writing, delete, fixture-launch support, platform release-manifest selection, ZIP extraction, SHA-256 verification, disk-space checks, and a first-run `Download Model…` dialog listing Qwen3 0.6B and Qwen3 4B availability. Qwen3 0.6B downloads through the manifest-backed production cache path when a release manifest URL is supplied; unpublished artifacts are shown as unavailable. Fast linked macOS tests pass on the macOS 27 host under `/Applications/Xcode-beta.app`; the real Qwen3 0.6B UI smoke is gated behind `TINYCHAT_RUN_REAL_MODEL_UI_TEST=1`.
 
 Acceptance:
 

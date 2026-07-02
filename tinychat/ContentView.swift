@@ -28,6 +28,7 @@ struct ContentView: View {
     @State private var isInstallingModel = false
     @State private var modelInstallError: String?
     @State private var modelDownloadProgress: ModelDownloadProgress?
+    @State private var isShowingModelDownloadDialog = false
 
     private var selectedChat: Chat? {
         if let selectedChatID, let chat = chats.first(where: { $0.id == selectedChatID }) {
@@ -136,13 +137,11 @@ struct ContentView: View {
                     .accessibilityIdentifier("install-fixture-model-button")
                 }
 
-                if let modelReleaseManifestURL {
-                    Button(isInstallingModel ? "Downloading..." : "Download Model") {
-                        downloadReleaseModel(manifestURL: modelReleaseManifestURL)
-                    }
-                    .disabled(isInstallingModel)
-                    .accessibilityIdentifier("download-model-button")
+                Button("Download Model…") {
+                    isShowingModelDownloadDialog = true
                 }
+                .disabled(isInstallingModel)
+                .accessibilityIdentifier("download-model-button")
             case .installed:
                 Label("Qwen3 0.6B installed", systemImage: "checkmark.circle")
                     .foregroundStyle(.secondary)
@@ -171,6 +170,88 @@ struct ContentView: View {
 
             Spacer()
         }
+        .sheet(isPresented: $isShowingModelDownloadDialog) {
+            modelDownloadDialog
+        }
+    }
+
+    private var modelDownloadDialog: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Download Model")
+                .font(.title2)
+                .fontWeight(.semibold)
+                .accessibilityIdentifier("model-download-dialog")
+
+            Text("Choose the model artifact tinychat should install into Application Support.")
+                .foregroundStyle(.secondary)
+
+            ForEach(modelDownloadOptions) { option in
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(option.displayName)
+                            .fontWeight(.semibold)
+                            .accessibilityIdentifier("model-option-\(option.id)")
+                        Text(option.detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    if let manifestURL = option.manifestURL {
+                        Button("Download") {
+                            isShowingModelDownloadDialog = false
+                            downloadReleaseModel(manifestURL: manifestURL)
+                        }
+                        .disabled(isInstallingModel)
+                        .accessibilityIdentifier("download-option-\(option.id)")
+                    } else {
+                        Text("Artifact not published yet")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("download-option-\(option.id)-unavailable")
+                    }
+                }
+                .padding()
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    isShowingModelDownloadDialog = false
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding()
+        .frame(minWidth: 460)
+    }
+
+    private struct ModelDownloadOption: Identifiable {
+        let id: String
+        let displayName: String
+        let detail: String
+        let manifestURL: URL?
+    }
+
+    private var modelDownloadOptions: [ModelDownloadOption] {
+        [
+            ModelDownloadOption(
+                id: "qwen3-0.6b",
+                displayName: "Qwen3 0.6B",
+                detail: modelReleaseManifestURL == nil
+                    ? "Small base model. Release artifact is not published yet."
+                    : "Small base model. Fast first-run download for smoke testing.",
+                manifestURL: modelReleaseManifestURL
+            ),
+            ModelDownloadOption(
+                id: "qwen3-4b",
+                displayName: "Qwen3 4B",
+                detail: "Larger model planned for the release gate. Release artifact is not published yet.",
+                manifestURL: nil
+            ),
+        ]
     }
 
     private func composer(for chat: Chat) -> some View {
