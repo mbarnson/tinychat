@@ -93,6 +93,14 @@ final class tinychatUITests: XCTestCase {
     func testFirstRunDownloadButtonUsesManifest() throws {
         let (manifestURL, _) = try createTestManifestAndZip()
         defer { try? FileManager.default.removeItem(at: manifestURL.deletingLastPathComponent()) }
+        addTeardownBlock {
+            let cleanupApp = XCUIApplication()
+            cleanupApp.terminate()
+            cleanupApp.launchArguments = ["--reset-model-cache"]
+            cleanupApp.launch()
+            _ = cleanupApp.staticTexts["model-status-missing"].waitForExistence(timeout: 10)
+            cleanupApp.terminate()
+        }
 
         let app = XCUIApplication()
         app.launchArguments = [
@@ -128,6 +136,15 @@ final class tinychatUITests: XCTestCase {
         if app.staticTexts["model-install-error"].exists {
             XCTFail("model-install-error shown: " + app.staticTexts["model-install-error"].label)
         }
+
+        let deleteButton = app.buttons["delete-model-button"]
+        XCTAssertTrue(deleteButton.waitForExistence(timeout: 10), "delete-model-button never appeared after fixture install")
+#if os(macOS)
+        deleteButton.click()
+#else
+        deleteButton.tap()
+#endif
+        XCTAssertTrue(app.staticTexts["model-status-missing"].waitForExistence(timeout: 30), "model-status-missing never appeared after deleting fixture model")
 
         app.terminate()
     }
@@ -208,8 +225,7 @@ final class tinychatUITests: XCTestCase {
     }
 
     private func installRealModelFixtureIntoAppSupport(from fixture: URL) throws {
-        let destination = realUserHomeDirectory()
-            .appending(path: "Library/Containers/org.barnson.tinychat/Data/Library/Application Support/tinychat/Models/qwen3-0.6b/macOS", directoryHint: .isDirectory)
+        let destination = installedModelDirectory()
         let parent = destination.deletingLastPathComponent()
 
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
@@ -219,11 +235,21 @@ final class tinychatUITests: XCTestCase {
         try FileManager.default.copyItem(at: fixture, to: destination)
     }
 
+    private func installedModelDirectory() -> URL {
+        realUserHomeDirectory()
+            .appending(path: "Library/Containers/org.barnson.tinychat/Data/Library/Application Support/tinychat/Models/qwen3-0.6b/macOS", directoryHint: .isDirectory)
+    }
+
     private func realUserHomeDirectory() -> URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let components = URL(fileURLWithPath: #filePath).pathComponents
+        if let usersIndex = components.firstIndex(of: "Users") {
+            let usernameIndex = components.index(after: usersIndex)
+            if components.indices.contains(usernameIndex) {
+                let homePath = components[...usernameIndex].joined(separator: "/")
+                return URL(fileURLWithPath: homePath, isDirectory: true)
+            }
+        }
+
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 }
