@@ -5,14 +5,15 @@
 //  Created by Matthew Barnson on 7/1/26.
 //
 
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 @main
 struct tinychatApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Chat.self,
+            Message.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
